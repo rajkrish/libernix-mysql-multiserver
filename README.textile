@@ -9,13 +9,13 @@ The MySQL server package had always provided a way to create such isolated insta
 
 h1.  Included files
 
-*  *mysql-webdata:*   The init script to control a MySQL instance called @webdata@.  
+*  *mysql-webdata:*   The init script to control a MySQL instance called @webdata@.  Requires bash.
 
 Note that:
 
-*  this one script could be copied as many times as we want to create multiple instances of MySQL server.  
-*  the name of every instance is derived from the name of the script, that is a copy of this script named as @mysql-INSTANCE@ would define the @INSTANCE@ instance.  
-*  All such copies of the script must reside under the /etc/init.d/ folder, which is the default location for all system startup scripts on most distributions of Linux.
+*  *Copies:*  This one script could be copied as many times as we want to create multiple instances of MySQL server.  
+*  *Instance Naming Convention:*  The name of every instance is derived from the name of the script, that is a copy of this script named as @mysql-INSTANCE@ would define the @INSTANCE@ instance.  
+*  *Location:*  All such copies of the script must reside under the /etc/init.d/ directory, which is the default location for all system startup scripts on most distributions of Linux.
 
 
 h1.  Installation and configuration of '@webdata@' instance
@@ -337,4 +337,11 @@ Tested on the following system configuration:
 *  *MySQL version:*  5.1.39
 *  *Host Hardware:*  AMD Phenom II (x86_64)
 
+h1.  License
 
+The contents of this project is released under the GNU LGPL v3.0 License.
+
+
+h1.  Feedback/Comments/Bugs
+
+Please report all the bugs and comments to the "GitHub Project site":http://github.com/rajkrish/libernix-mysql-multiserver
