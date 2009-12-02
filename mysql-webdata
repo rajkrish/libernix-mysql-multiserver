@@ -1,0 +1,579 @@
+#!/usr/bin/env /bin/bash
+
+# ------------------------------------------------------------------------------------
+# chkconfig: - 63 37
+# description:  MySQL database server instance for mysqld-<application>.
+# processname: mysqld
+
+# ------------------------------------------------------------------------------------
+# this script specific variables change when you create a new server instance ...
+# ------------------------------------------------------------------------------------
+# added by Rajesh ...
+# Find the name of the script
+NAME=`basename $0`
+if [ ${NAME:0:1} = "S" -o ${NAME:0:1} = "K" ]
+then
+    NAME=${NAME:3}
+fi
+
+nameInstance="${NAME#mysql-}"
+if [ -z "$nameInstance" ] || [ "$nameInstance"  == "$NAME" ] ; then
+	echo "ERROR:  Invalid name for the script '%NAME'.  This script should be named as mysql-<INSTANCE>.  Terminating."
+	exit 1
+fi
+
+# ------------------------------------------------------------------------------------
+#  NOTE:  Change the following to reflect the configuration of your system.
+#  NOTE:  If dirMount does not point to a mountable partition, then set bCheckMount to false.
+#  NOTE:  Admin password (passwordInstanceAdmin) defaults to the name of this instance, capitalized.
+
+nPort="44330"
+dirMount=/mnt/sdb4
+bCheckMount="true"  # check if the mountpoint is enabled
+
+sBuffer="50M"   # used for specifying amount of RAM memory for all buffers and loggers
+nSequence="37"  # used for starting or terminating daemon sequence number in /etc/rc.d/init.d
+passwordInstanceAdmin=$( echo "$nameInstance" | tr 'a-z' 'A-Z' )
+
+# define the subnet and DNS domain name patterns for use in the stored procedures...
+# if you don't have as many subnets or domain names, repeat the same patterns...
+patternSubnet1="'192.168.%'"
+patternSubnet2="'10.%'"
+patternSubnet3="'127.0.%'"
+patternSubnet4="'169.254.%'"
+patternSubnet5="'172.%'"
+patternDnsName1="'desktop%'"
+patternDnsName2="'localhost'"
+patternDnsName3="'localhost.localdomain'"
+patternDnsName4="'localhost%'"
+patternDnsName5="'%'"
+patternDnsName6="@@hostname"    # this is a mysql global variable, no single-quote allowed
+
+
+
+
+# ------------------------------------------------------------------------------------
+# Source function library.
+[ -f  /etc/rc.d/init.d/functions ] && . /etc/rc.d/init.d/functions
+
+# Source networking configuration.
+[ -f  /etc/sysconfig/network ] && . /etc/sysconfig/network
+
+
+# ------------------------------------------------------------------------------------
+# mysql installation executables ....
+MYSQLD="/usr/libexec/mysqld"
+MYSQLMANAGER="/usr/libexec/mysqlmanager"
+MYSQLDSAFE="/usr/bin/mysqld_safe"
+MYSQLINSTALLDB="/usr/bin/mysql_install_db"
+MYSQLTZINFOTOSQL="/usr/bin/mysql_tzinfo_to_sql"
+MYSQLADMIN="/usr/bin/mysqladmin"
+
+# ------------------------------------------------------------------------------------
+# this script handler ....
+nameLanucher="launcher"
+pathThisScript="$0"
+nameThisScript=$(basename "${pathThisScript}")
+dirThisScript=$(dirname "${pathThisScript}")
+nameInstanceFromScript=${nameThisScript#mysqld-*}
+nameInstanceFromScript=${nameInstance%*.sh}
+
+
+# ------------------------------------------------------------------------------------
+# server instance variables ....
+dirHome=${dirMount}/mysql
+dirInstances="${dirHome}"
+dirInstance="${dirInstances}/${nameInstance}"
+dirInnodb="${dirInstance}/data/innodb"
+dirMyisam="${dirInstance}/data/myisam"
+dirLog="${dirInstance}/log"
+dirRun="${dirInstance}/run"
+
+pathPid="${dirRun}/mysqld.pid"
+pathSock="${dirRun}/mysqld.sock"
+pathSqlLog="${dirLog}/mysqld.sql.log"
+pathBinLog="${dirLog}/mysqld.bin.log"
+pathBinLogIndex="${dirLog}/mysqld.bin.log.index"
+pathErrorLog="${dirLog}/mysqld.error.log"
+pathTimezoneInfo="${dirLog}/mysqld.timezone.info"
+
+
+sDash="------------------------------------------------------------------------------"
+sqlUserInit="
+use mysql;
+-- create a table to hold all the patterns ...
+create table if not exists  krish_host_pattern(pattern varchar(60) not null primary key);
+create table if not exists krish_user_type(username varchar(16) not null primary key, usertype enum ('admin', 'appuser') not null default 'appuser');
+delimiter ///
+
+create	definer=root@localhost
+		procedure setUserType(in sUserName varchar(16), in enUserType enum('admin', 'appuser'))
+begin
+	if exists (select * from krish_user_type where username = sUserName) then 
+		update krish_user_type set usertype = enUserType where username  = sUserName;
+	else
+		insert into krish_user_type values (sUserName, enUserType);
+	end if;
+end ///
+
+create	definer=root@localhost
+		procedure addPattern(in sPattern varchar(60) )
+begin
+	if not exists (select * from krish_host_pattern where pattern = sPattern) then
+		insert into krish_host_pattern	(pattern) 
+					values				(sPattern);
+	end if; 
+end /// 
+
+create	definer=root@localhost
+		procedure grantSysHostUserPassword (in sHost varchar(60), in sUser varchar(16), in sPassword varchar(16) )
+begin
+	if exists (select * from user where host = sHost and user = sUser) then
+		update user set password = PASSWORD(sPassword) where host = sHost and user = sUser;
+	else
+		insert into 
+			user	(	host,					user,				password,
+						select_priv,			insert_priv,		update_priv,		delete_priv,	
+						create_priv,			drop_priv,			reload_priv,		shutdown_priv,	
+						process_priv,			file_priv,			grant_priv,			references_priv,	
+						index_priv,				alter_priv,			show_db_priv,		super_priv,	
+						create_tmp_table_priv,	lock_tables_priv,	execute_priv,		repl_slave_priv,	
+						repl_client_priv,		create_view_priv,	show_view_priv,		create_routine_priv,	
+						alter_routine_priv,		create_user_priv,	event_priv,			trigger_priv,	
+						ssl_type,				 						-- removed ssl_cipher x509_issuer,	x509_subject,	(cannot be null)
+						max_questions,			max_updates,		max_connections,	max_user_connections )
+			values	(	sHost, sUser, PASSWORD(sPassword),
+						'Y',	'Y',	'Y',	'Y',	
+						'Y',	'Y',	'Y',	'Y',	
+						'Y',	'Y',	'Y',	'Y',	
+						'Y',	'Y',	'Y',	'Y',	
+						'Y',	'Y',	'Y',	'Y',	
+						'Y',	'Y',	'Y',	'Y',	
+						'Y',	'Y',	'Y',	'Y',
+						'',							-- removed ssl_cipher x509_issuer,	x509_subject,	(cannot be null)
+						0,		0,		0,		0);
+	end if;
+	flush privileges;
+end ///
+
+create	definer=root@localhost
+		procedure grantSysPrivileges (in sUser varchar(16), in sPassword varchar(16) )
+begin
+	call grantSysHostUserPassword(${patternSubnet1}, sUser, sPassword);
+	call grantSysHostUserPassword(${patternSubnet2}, sUser, sPassword);
+	call grantSysHostUserPassword(${patternSubnet3}, sUser, sPassword);
+	call grantSysHostUserPassword(${patternSubnet4}, sUser, sPassword);
+	call grantSysHostUserPassword(${patternSubnet5}, sUser, sPassword);
+	call grantSysHostUserPassword(${patternDnsName1}, sUser, sPassword);
+	call grantSysHostUserPassword(${patternDnsName2}, sUser, sPassword);
+	call grantSysHostUserPassword(${patternDnsName3}, sUser, sPassword);
+	call grantSysHostUserPassword(${patternDnsName4}, sUser, sPassword);
+	call grantSysHostUserPassword(${patternDnsName5}, sUser, sPassword);
+	call grantSysHostUserPassword(${patternDnsName6}, sUser, sPassword);
+end ///
+
+create	definer=root@localhost
+		procedure setSysPassword (in sPassword varchar(16) )
+begin
+	call grantSysPrivileges('root', sPassword);
+	call grantSysPrivileges('sys', sPassword);
+	call grantSysPrivileges('${nameInstance}', sPassword);
+end ///
+
+create	definer=root@localhost
+		procedure sysInitialize ()
+begin
+	call setSysPassword('${passwordInstanceAdmin}');
+	call addPattern(${patternSubnet1});
+	call addPattern(${patternSubnet2});
+	call addPattern(${patternSubnet3});
+	call addPattern(${patternSubnet4});
+	call addPattern(${patternSubnet5});
+	call addPattern(${patternDnsName1});
+	call addPattern(${patternDnsName2});
+	call addPattern(${patternDnsName3});
+	call addPattern(${patternDnsName4});
+	call addPattern(${patternDnsName5});
+	call addPattern(${patternDnsName6});
+end ///
+
+delimiter ;
+call sysInitialize () ;
+-- flush privileges ;
+"
+
+# ------------------------------------------------------------------------------------
+# got the following function from -
+# http://www.linuxtopia.org/online_books/advanced_bash_scripting_guide/assortedtips.html
+function capitalize_ichar()    #  Capitalizes initial character
+{                            	#+ of argument string(s) passed.
+
+  string0="$@"               # Accepts multiple arguments.
+
+  firstchar=${string0:0:1}   # First character.
+  string1=${string0:1}       # Rest of string(s).
+
+  FirstChar=`echo "$firstchar" | tr a-z A-Z`
+                             # Capitalize first character.
+
+  echo "$FirstChar$string1"  # Output to stdout.
+
+}  
+
+# ------------------------------------------------------------------------------------
+function showError()
+{
+	echo "ERROR:  " $2
+	exit $1
+}
+
+# ------------------------------------------------------------------------------------
+function showWarning()
+{
+	echo "WARNING:  " $1
+}
+
+# ------------------------------------------------------------------------------------
+function showInfo()
+{
+	echo "INFO:  " $1
+}
+
+function checkMounted()
+{
+	if [ "$bCheckMount" == "true" ] || [ "$bCheckMount" == "TRUE" ] ; then
+		mountpoint -q "${dirMount}" 
+		isMounted="$?"
+		if [ "$isMounted" != 0 ] ;  then
+			showError 3 "The mountpoint ${dirMount} is not mounted (retcode: ${isMounted}).  Check your /etc/fstab, or alternatively, mount a disk partion on ${dirMount} and try again."
+		fi
+	fi
+}
+
+# ------------------------------------------------------------------------------------
+function main()
+{
+	[[ "$#" != "1" ]]							&& showError 1 "Did not receive a task argument on the command line."	
+	
+	nameTask="${1}"
+	
+	[[ "$nameInstance" == "" ]] 				&& showError 1 "Invalid instance name.  The script file should be named 'mysqld-[INSTANCE]' under /etc/[rc.d]/init.d/, and be a symlink to /etc/[rc.d]/init.d/mysql-launcher.sh"
+	
+	[[ "$nameInstance" == "$nameLauncher"  ]]	&& showError 1 "Do not launch mysqld-${nameLanucher}.sh script directly.  create a Symlink instead."
+	
+	[[ -x "${MYSQLD}" ]]  			|| showError 2 "${MYSQLD} was not found.  Is mysql server installed on this system?"
+	[[ -x "${MYSQLDSAFE}" ]]  		|| showError 2 "${MYSQLDSAFE} was not found.  Is mysql server installed on this system?"
+	[[ -x "${MYSQLINSTALLDB}" ]] 	|| showError 2 "${MYSQLINSTALLDB} was not found.  Is mysql server installed on this system?"
+	[[ -x "${MYSQLTZINFOTOSQL}" ]]  || showError 2 "${MYSQLTZINFOTOSQL} was not found.  Is mysql server installed on this system?"
+	
+	case "${nameTask}" in
+		"info")
+			info
+			;;
+		"help")
+			help
+			;;
+		"create")
+			checkMounted
+			create
+			;;
+		"start")
+			checkMounted
+			start
+			;;
+		"stop")
+			checkMounted
+			stop
+			;;
+		"restart")
+			checkMounted
+			restart
+			;;
+		"flush")
+			checkMounted
+			flush
+			;;
+		"status")
+			checkMounted
+			status
+			;;
+		"condrestart")
+			checkMounted
+			condrestart
+			;;
+		*)
+			showError 4 "Unknown task, or task not specified."
+			;;
+	esac
+	exit 0
+}
+
+# ------------------------------------------------------------------------------------
+function existsInstance()
+{
+	nRet=1
+	if [[  -d "${dirInstance}" ]] ; then
+		nRet=0
+	fi
+	echo ${nRet}
+}
+
+# ------------------------------------------------------------------------------------
+function isInstanceRunning()
+{
+	nRet=1
+	if [[ ( -f "${pathPid}" ) || ( -S "${pathSock}" ) ]]  ; then
+		nRet=0
+	fi
+	echo ${nRet}
+}
+
+# ------------------------------------------------------------------------------------
+function help()
+{
+	printf "INFO:  This is the init script for a MySQL server instance with name = '${nameInstance}'. \n"
+	printf "INFO:  ACTIONS: \n"
+	printf "INFO:  ACTION:  help        -  This help message.\n"
+	printf "INFO:  ACTION:  info        -  Displays current configuration and variables.\n"
+	printf "INFO:  ACTION:  create      -  Create (initialize) the instance for the first time.\n"
+	printf "INFO:  ACTION:  start       -  Starts this instance.\n"
+	printf "INFO:  ACTION:  stop        -  Stops this instance.\n"
+	printf "INFO:  ACTION:  restart     -  Restart this instance.\n"
+	printf "INFO:  ACTION:  condrestart -  Restart this instance conditionally.\n"
+	printf "INFO:  ACTION:  flush       -  Flushes (reloads) this instance.\n"
+	printf "INFO:  ACTION:  status      -  Display execution status.\n"
+}
+
+# ------------------------------------------------------------------------------------
+function info()
+{
+	nDescWidth=30
+	nVarWidth=13
+	printf "INFO:  This instance of MySQL is configured as follows:\n"
+	printf "INFO:  %-${nDescWidth}s %-${nVarWidth}s = '%s'\n" "Configured Port:"  "nPort"       "${nPort}"
+	printf "INFO:  %-${nDescWidth}s %-${nVarWidth}s = '%s'\n" "Mountpoint directory:"  "dirMount"       "${dirMount}"
+	printf "INFO:  %-${nDescWidth}s %-${nVarWidth}s = '%s'\n" "Check mountpoint on startup:"  "bCheckMount"       "${bCheckMount}"
+	printf "INFO:  %-${nDescWidth}s %-${nVarWidth}s = '%s'\n" "Home Directory:"  "dirHome"       "${dirHome}"
+	printf "INFO:  %-${nDescWidth}s %-${nVarWidth}s = '%s'\n" "Instance Name:"  "nameInstance"       "${nameInstance}"
+	printf "INFO:  %-${nDescWidth}s %-${nVarWidth}s = '%s'\n" "Instance Directory - (base):"  "dirInstance"       "${dirInstance}"
+	printf "INFO:  %-${nDescWidth}s %-${nVarWidth}s = '%s'\n" "Instance Directory - InnoDB:"  "dirInnodb"       "${dirInnodb}"
+	printf "INFO:  %-${nDescWidth}s %-${nVarWidth}s = '%s'\n" "Instance Directory - MyIsam:"  "dirMyisam"       "${dirMyisam}"
+	printf "INFO:  %-${nDescWidth}s %-${nVarWidth}s = '%s'\n" "Instance Directory - Logs:"  "dirLog"       "${dirLog}"
+	printf "INFO:  %-${nDescWidth}s %-${nVarWidth}s = '%s'\n" "Instance Directory - Run:"  "dirRun"       "${dirRun}"
+	echo
+	printf "INFO:  Feel free to change the variables 'nPort', 'dirMount', 'bCheckMount' in this init script to suit your system configuration.\n\n"
+}
+
+# ------------------------------------------------------------------------------------
+function create()
+{
+	if [[ ! -d "${dirHome}" ]] ; then
+		showWarning "Creating directory ${dirHome} ..."
+		mkdir -p "${dirHome}"
+		chown -R mysql:mysql "${dirHome}"
+	fi
+	
+	if [[ ! -d "${dirInstances}" ]] ; then
+		showWarning "Creating directory ${dirInstances} ..."
+		mkdir -p "${dirInstances}"
+		chown -R mysql:mysql "${dirInstances}"
+	fi
+	
+	[[ $(existsInstance)  == "0" ]] 	\
+		&& showError 5 "The server instance ${nameInstance} already exists under ${dirInstance}. Stop this instance if it is running, and move the '${nameInstance}' directory out of the way if you wish to reinitialize the instance."
+	
+	if [[ -z $(isInstanceRunning) ]] ; then
+		numPid=$(cat "$pathPid")
+		showError 6 "The mysql instance '${nameInstance}' is already running with pid = ${numPid},  pidfile = '${pathPid}' and/or socket = '${pathSock}'.  Stop the server instance and try again."
+	fi
+	
+# create an instance ...
+	mkdir -p "${dirInstance}"
+	mkdir -p "${dirInnodb}"
+	mkdir -p "${dirMyisam}"
+	mkdir -p "${dirLog}"
+	mkdir -p "${dirRun}"
+	chmod ug+w,a+rx "${dirInstance}"
+	chown -R mysql:mysql  "${dirInstance}"
+	
+	showInfo "Initializing mysqld instance ${nameInstance} ..."
+	${MYSQLINSTALLDB} --datadir=${dirMyisam} \
+	--default-storage-engine=innodb \
+	--general_log_file=${pathSqlLog} \
+	--log-bin=${pathBinLog} \
+	--log-bin-index=${pathBinLogIndex} \
+	--log-error=${pathErrorLog} \
+	--pid-file=${pathPid} \
+	--socket=${pathSock} \
+	--skip-networking	\
+	--bulk_insert_buffer_size=${sBuffer}  \
+	--innodb_data_file_path=${nameInstance}.innodb:100M:autoextend \
+	--innodb_data_home_dir=${dirInnodb} \
+	--innodb_autoextend_increment=${sBuffer}  \
+	--innodb_buffer_pool_size=${sBuffer}  \
+	--innodb_additional_mem_pool_size=${sBuffer}  \
+	--innodb_log_file_size=${sBuffer} \
+	--innodb_log_buffer_size=${sBuffer} \
+	--innodb_flush_log_at_trx_commit=1 \
+	--innodb_log_group_home_dir=${dirLog} \
+	>/dev/null 
+	
+	chmod ug+w,a+rx "${dirInstance}"
+	chown -R mysql:mysql  "${dirInstance}"
+	nRet=$?
+
+	[[ -z "$nRet" ]] && showError 7 "Could not create the installation instance ${nameInstance}. ${MYSQLINSTALLDB} returned ${nRet}."	
+	
+	${MYSQLDSAFE} --no-defaults	\
+		--skip-grant-tables  \
+		--datadir=${dirMyisam} \
+		--default-storage-engine=innodb \
+		--general_log_file=${pathSqlLog} \
+		--log-bin=${pathBinLog} \
+		--log-bin-index=${pathBinLogIndex} \
+		--log-error=${pathErrorLog} \
+		--pid-file=${pathPid} \
+		--socket=${pathSock} \
+		--skip-networking	\
+		--bulk_insert_buffer_size=${sBuffer}  \
+		--innodb_data_file_path=${nameInstance}.innodb:100M:autoextend \
+		--innodb_data_home_dir=${dirInnodb} \
+		--innodb_autoextend_increment=${sBuffer}  \
+		--innodb_buffer_pool_size=${sBuffer}  \
+		--innodb_additional_mem_pool_size=${sBuffer}  \
+		--innodb_log_file_size=${sBuffer} \
+		--innodb_log_buffer_size=${sBuffer} \
+		--innodb_flush_log_at_trx_commit=1 \
+		--innodb_log_group_home_dir=${dirLog} 	\
+		--innodb_log_files_in_group=1	\
+		--user="mysql" \
+		>/dev/null  &
+## --tx_isolation=SERIALIZABLE  
+	sleep 8
+	
+	if [[ ( ! -f "${pathPid}" ) || ( ! -S "${pathSock}" ) ]] ; then
+		echo
+		tail -n 20 "${pathErrorLog}"
+		showError 8 "${MYSQLDSAFE} did not start correctly."
+	fi
+	
+	nPid=$(cat "${pathPid}")
+# initialize the tzinfo ...
+	showInfo "Initializing the zoneinfo files ..."
+	${MYSQLTZINFOTOSQL} /usr/share/zoneinfo 2>/dev/null  | mysql -u root mysql -S "${pathSock}" 
+	
+	echo "$sqlUserInit" | mysql -u root mysql -S "${pathSock}" 
+	stop
+	chmod ug+w,a+rx "${dirInstance}"
+	chown -R mysql:mysql  "${dirInstance}"
+}
+
+# ------------------------------------------------------------------------------------
+function start()
+{
+	[[ ! -d ${dirInstance} ]] && showError 5 "The server instance ${nameInstance} does not exist as ${dirInstance}."
+	
+	${MYSQLDSAFE} --no-defaults	\
+		--datadir=${dirMyisam} \
+		--default-storage-engine=innodb \
+		--general_log_file=${pathSqlLog} \
+		--log-bin=${pathBinLog} \
+		--log-bin-index=${pathBinLogIndex} \
+		--log-error=${pathErrorLog} \
+		--pid-file=${pathPid} \
+		--socket=${pathSock} \
+		--bulk_insert_buffer_size=${sBuffer}  \
+		--innodb_data_file_path=${nameInstance}.innodb:100M:autoextend \
+		--innodb_data_home_dir=${dirInnodb} \
+		--innodb_autoextend_increment=${sBuffer}  \
+		--innodb_buffer_pool_size=${sBuffer}  \
+		--innodb_additional_mem_pool_size=${sBuffer}  \
+		--innodb_log_file_size=${sBuffer} \
+		--innodb_log_buffer_size=${sBuffer} \
+		--innodb_flush_log_at_trx_commit=1 \
+		--innodb_log_group_home_dir=${dirLog} 	\
+		--innodb_log_files_in_group=1	\
+		--port="${nPort}"  \
+		--user="mysql"  &
+## # --skip-networking	
+## --tx_isolation=SERIALIZABLE  
+	sleep 8
+	if [[ ( ! -f "${pathPid}" ) || ( ! -S "${pathSock}" ) ]] ; then
+		echo
+		tail -n 20 "${pathErrorLog}"
+		showError 8 "${MYSQLDSAFE} did not start correctly."
+	fi
+	
+	nPid=$(cat "${pathPid}")
+	showInfo "Mysql instance ${nameInstance} with pid ${nPid} is running."
+}
+
+# ------------------------------------------------------------------------------------
+function stop()
+{
+	[[ ! -d ${dirInstance} ]] && showError 5 "The server instance ${nameInstance} does not exist as ${dirInstance}.  Did you 'create' it?"
+	
+	if [[ -S "${pathSock}" ]] ; then
+		showInfo "Shutting down server running with socket ${pathSock} using ${MYSQLADMIN} ..."
+		${MYSQLADMIN} -u root --password=${passwordInstanceAdmin} -S "${pathSock}" shutdown
+		sleep 8
+	else
+		showWarning "Did not find the server  socket on ${pathSock}.. (may be OK)"
+	fi 
+	
+	if [[ -f "${pathPid}" ]] ; then
+		nPid=$(cat "${pathPid}")
+		kill "$nPid"
+	else
+		showWarning "Did not find the server  pid file on ${pathPid}. (may be OK)"
+	fi
+	
+}
+
+# ------------------------------------------------------------------------------------
+function restart()
+{
+	stop
+	start
+}
+
+# ------------------------------------------------------------------------------------
+function flush()
+{
+	if [[ -S  "${pathSock}" ]] ; then
+		${MYSQLADMIN} -u root  --password=${passwordInstanceAdmin} -S ${pathSock} reload
+	fi
+}
+
+# ------------------------------------------------------------------------------------
+function status()
+{
+	if [[ -S  "${pathSock}" ]] ; then
+		showInfo "Mysql instance ${nameInstance}  server Status ..."
+		${MYSQLADMIN} -u root --password=${passwordInstanceAdmin}  -S "${pathSock}" version
+		${MYSQLADMIN} -u root --password=${passwordInstanceAdmin}  -S "${pathSock}" status
+	else
+		showError 9 "Did not find the server running with socket on ${pathSock}."
+	fi
+}
+
+# ------------------------------------------------------------------------------------
+function condrestart()
+{
+	if [[ ( -S "${pathSock}" ) || ( -f "${pathPid}" ) ]] ; then
+		showError 10 "The Mysql instance seems to be already running. "
+	fi
+	
+	restart
+}
+
+
+# ------------------------------------------------------------------------------------
+main $1
+
+
+
+
+
+
+

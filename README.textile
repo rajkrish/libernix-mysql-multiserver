@@ -1,0 +1,340 @@
+
+h1.  Description 
+
+This project describes a way to help create multiple,  isolated, named instances of MySQL server, running on the same host machine simultaneously.
+
+h1. History
+
+The MySQL server package had always provided a way to create such isolated instances in its default /etc/my.conf file configuration, using @[mysqld N]@ constructs (N = integer).  However, such instances were numbered (not named), and were not easy to manipulate using MySQL command line tools.
+
+h1.  Included files
+
+*  *mysql-webdata:*   The init script to control a MySQL instance called @webdata@.  
+
+Note that:
+
+*  this one script could be copied as many times as we want to create multiple instances of MySQL server.  
+*  the name of every instance is derived from the name of the script, that is a copy of this script named as @mysql-INSTANCE@ would define the @INSTANCE@ instance.  
+*  All such copies of the script must reside under the /etc/init.d/ folder, which is the default location for all system startup scripts on most distributions of Linux.
+
+
+h1.  Installation and configuration of '@webdata@' instance
+
+The following steps would illustrate the process of creating a MySQL server instance called 'webdata'.  Execute all commands on the @bash@ command prompt as the @root@ user, unless specified otherwise.  
+
+*Note:*  The following commands and scripts were tested on an AMD x86_64 machine running Fedora Linux 12.  Minor changes would be necessary for other Linux distributions.
+
+h4. Copy the included file @mysql-webdata@ into the @/etc/init.d/@ directory.
+
+<pre>
+#   cp libernix-mysql-multiserver/mysql-webdata /etc/init.d/
+</pre>
+
+h4. Change access permissions of the script:
+
+<pre>
+#  chown root:root /etc/init.d/mysql-webdata
+#  chmod 710 /etc/init.d/mysql-webdata
+</pre>
+
+
+h4. Check the help message:
+
+<pre>
+#  /etc/init.d/mysql-webdata help
+
+INFO:  This is the init script for a MySQL server instance with name = 'webdata'.
+INFO:  ACTIONS:
+INFO:  ACTION:  help        -  This help message.
+INFO:  ACTION:  info        -  Displays current configuration and variables.
+INFO:  ACTION:  create      -  Create (initialize) the instance for the first time.
+INFO:  ACTION:  start       -  Starts this instance.
+INFO:  ACTION:  stop        -  Stops this instance.
+INFO:  ACTION:  restart     -  Restart this instance.
+INFO:  ACTION:  condrestart -  Restart this instance conditionally.
+INFO:  ACTION:  flush       -  Flushes (reloads) this instance.
+INFO:  ACTION:  status      -  Display execution status.
+</pre>
+
+h4. Check the default configuration:
+
+<pre>
+#   /etc/init.d/mysql-webdata info
+
+INFO:  This instance of MySQL is configured as follows:
+INFO:  Configured Port:               nPort         = '44330'
+INFO:  Mountpoint directory:          dirMount      = '/mnt/sdb4'
+INFO:  Check mountpoint on startup:   bCheckMount   = 'true'
+INFO:  Home Directory:                dirHome       = '/mnt/sdb4/mysql'
+INFO:  Instance Name:                 nameInstance  = 'webdata'
+INFO:  Instance Directory - (base):   dirInstance   = '/mnt/sdb4/mysql/webdata'
+INFO:  Instance Directory - InnoDB:   dirInnodb     = '/mnt/sdb4/mysql/webdata/data/innodb'
+INFO:  Instance Directory - MyIsam:   dirMyisam     = '/mnt/sdb4/mysql/webdata/data/myisam'
+INFO:  Instance Directory - Logs:     dirLog        = '/mnt/sdb4/mysql/webdata/log'
+INFO:  Instance Directory - Run:      dirRun        = '/mnt/sdb4/mysql/webdata/run'
+
+INFO:  Feel free to change the variables 'nPort', 'dirMount', 'bCheckMount' in this init script to suit your system configuration.
+</pre>
+
+h4. Now open the @/etc/init.d/mysql-webdata@ script in your favorite text editor and change the following variables:
+
+* *nPort:*  This is the port number that this MySQL instance should use.  This has to be unique for every instance.
+
+* *dirMount:*  The base dir for the @mysql@ home directory, which in my case, is usually a mountpoint for some physical disk partition also (the @/mnt/sdb4@ directory in the @info@ above).  Specify a  base directory location for hosting all the instances of MySQL servers.
+
+* *bCheckMount:*  If the mountpoint @dirMount@ is not a mountpoint to a physical disk partition, then set this value to @false@.  Not doing so would result in errors during the execution of @mysql-webdata@ script.
+
+Run the command @/etc/init.d/mysql-webdata info@ again until you are satisfied with the configuration information you have provided to the instance.
+
+h4. Create the instance:
+
+<pre>
+#  /etc/init.d/mysql-webdata create
+
+WARNING:   Creating directory /mnt/sdb4/mysql ...                                                                                                       
+INFO:   Initializing mysqld instance webdata ...                                                                                                        
+INFO:   Initializing the zoneinfo files ...                                                                                                             
+INFO:   Shutting down server running with socket /mnt/sdb4/mysql/webdata/run/mysqld.sock using /usr/bin/mysqladmin ...                                  
+WARNING:   Did not find the server pid file on /mnt/sdb4/mysql/webdata/run/mysqld.pid. (may be OK)                                                      
+</pre>
+
+Verify that you find all the default MySQL filesystem layout contents under the directory identified by @dirInstance@ above.
+
+h4. At this point you are ready to launch the server:
+
+<pre>
+#  /etc/init.d/mysql-webdata start
+
+091201 21:58:12 mysqld_safe Logging to '/mnt/sdb4/mysql/webdata/log/mysqld.error.log'.
+091201 21:58:12 mysqld_safe Starting mysqld daemon with databases from /mnt/sdb4/mysql/webdata/data/myisam
+
+</pre>
+
+h4. Verify that the server instance is running:
+
+<pre>
+#   /etc/init.d/mysql-webdata status
+
+INFO:   Mysql instance webdata server Status ...
+/usr/bin/mysqladmin  Ver 8.42 Distrib 5.1.39, for redhat-linux-gnu on x86_64
+Copyright 2000-2008 MySQL AB, 2008 Sun Microsystems, Inc.
+This software comes with ABSOLUTELY NO WARRANTY. This is free software,
+and you are welcome to modify and redistribute it under the GPL license
+
+Server version          5.1.39-log
+Protocol version        10
+Connection              Localhost via UNIX socket
+UNIX socket             /mnt/sdb4/mysql/webdata/run/mysqld.sock
+Uptime:                 33 min 56 sec
+
+Threads: 1  Questions: 1  Slow queries: 0  Opens: 15  Flush tables: 1  Open tables: 8  Queries per second avg: 0.0
+Uptime: 2036  Threads: 1  Questions: 2  Slow queries: 0  Opens: 15  Flush tables: 1  Open tables: 8  Queries per second avg: 0.0
+</pre>
+
+
+h4. Verify that A MySQL server instance is running with the @ps@ command:
+
+<pre>
+#  ps aux | grep -i webdata
+
+root     11109  0.0  0.0 105584  1300 pts/10   S    22:08   0:00 /bin/sh /usr/bin/mysqld_safe --no-defaults --datadir=/mnt/sdb4/mysql/webdata/data/myisam --default-storage-engine=innodb --general_log_file=/mnt/sdb4/mysql/webdata/log/mysqld.sql.log --log-bin=/mnt/sdb4/mysql/webdata/log/mysqld.bin.log --log-bin-index=/mnt/sdb4/mysql/webdata/log/mysqld.bin.log.index --log-error=/mnt/sdb4/mysql/webdata/log/mysqld.error.log --pid-file=/mnt/sdb4/mysql/webdata/run/mysqld.pid --socket=/mnt/sdb4/mysql/webdata/run/mysqld.sock --bulk_insert_buffer_size=50M --innodb_data_file_path=webdata.innodb:100M:autoextend --innodb_data_home_dir=/mnt/sdb4/mysql/webdata/data/innodb --innodb_autoextend_increment=50M --innodb_buffer_pool_size=50M --innodb_additional_mem_pool_size=50M --innodb_log_file_size=50M --innodb_log_buffer_size=50M --innodb_flush_log_at_trx_commit=1 --innodb_log_group_home_dir=/mnt/sdb4/mysql/webdata/log --innodb_log_files_in_group=1 --port=44330 --user=mysql
+
+mysql    11271  0.0  0.9 449228 75908 pts/10   Sl   22:08   0:00 /usr/libexec/mysqld --no-defaults --basedir=/usr --datadir=/mnt/sdb4/mysql/webdata/data/myisam --user=mysql --default-storage-engine=innodb --general_log_file=/mnt/sdb4/mysql/webdata/log/mysqld.sql.log --log-bin=/mnt/sdb4/mysql/webdata/log/mysqld.bin.log --log-bin-index=/mnt/sdb4/mysql/webdata/log/mysqld.bin.log.index --bulk_insert_buffer_size=50M --innodb_data_file_path=webdata.innodb:100M:autoextend --innodb_data_home_dir=/mnt/sdb4/mysql/webdata/data/innodb --innodb_autoextend_increment=50M --innodb_buffer_pool_size=50M --innodb_additional_mem_pool_size=50M --innodb_log_file_size=50M --innodb_log_buffer_size=50M --innodb_flush_log_at_trx_commit=1 --innodb_log_group_home_dir=/mnt/sdb4/mysql/webdata/log --innodb_log_files_in_group=1 --log-error=/mnt/sdb4/mysql/webdata/log/mysqld.error.log --pid-file=/mnt/sdb4/mysql/webdata/run/mysqld.pid --socket=/mnt/sdb4/mysql/webdata/run/mysqld.sock --port=44330
+</pre>
+
+
+Note that the default password for the Administrator (@root@ account) is the name of the instance, capitalized.  For example, for our init script named @mysql-webdata@, the instance name is @webdata@ and hence the @root@ password is @WEBDATA@.  If you ever wish to change this password, you must also change the password specified in this init script (look for @passwordInstanceAdmin@ variable in the script, and change it to your configured password).  
+
+*WARNING:  Note that this script contains the @root@ password, hence it is of utmost importance that you ensure that the script is not accessible to anyone else other than the system administrator (system @root@ user account only)*.
+
+
+h4. Stop the server using the following command:
+
+<pre>
+#   /etc/init.d/mysql-webdata stop
+
+INFO:   Shutting down server running with socket /mnt/sdb4/mysql/webdata/run/mysqld.sock using /usr/bin/mysqladmin ...
+091201 22:49:34 mysqld_safe mysqld from pid file /mnt/sdb4/mysql/webdata/run/mysqld.pid ended
+WARNING:   Did not find the server pid file on /mnt/sdb4/mysql/webdata/run/mysqld.pid. (may be OK)
+</pre>
+
+h4.  If the server instance starts and stops cleanly, then (optionally) register it with the OS (to automatically start on boot).  
+
+*Note:*  The @chkconfig@ command may be specific to Fedora Linux.  Commands to configure init scripts in other distributions may vary:
+
+<pre>
+#  chkconfig --add /etc/init.d/mysql-webdata
+
+#  chkconfig mysql-webdata on
+
+#  chkconfig --list mysql-webdata
+
+mysql-webdata   0:off   1:off   2:on    3:on    4:on    5:on    6:off
+
+</pre>
+
+
+
+h1.  Creating another instance of MySQL called @mysql-development@
+
+Now we would consider creating another custom MySQL server instance, that runs on port 4306, with data files on the 'root'  file system (that is, not using any mounted partitions).  Additionally we want the mysql instances under @/var/serverdata@, which is not a mountpoint.
+
+h4.  As system 'root' user, copy the @mysql-webdata@ script and rename it as @mysql-development@, which reflects the name of the server instance we want.  Also change file permissions, etc.
+
+<pre>
+#  cp libernix-mysql-multiserver/mysql-webdata /etc/init.d/mysql-development
+#  chown root:root /etc/init.d/mysql-development
+#  chmod 710 /etc/init.d/mysql-development
+</pre>
+
+h4. Open the file @/etc/init.d/mysql-development@ in a text editor, and observe the following information:
+
+<pre>
+nPort="44330"
+dirMount=/mnt/sdb4
+bCheckMount="true"  # check if the mountpoint is enabled
+</pre>
+
+h4.  Update the port number to the port we want (4306), and also the location we want (/var/serverdata) as follows:
+
+<pre>
+nPort="4306"
+dirMount=/var/serverdata
+bCheckMount="false"  
+</pre>
+
+h4.  Check the info:
+
+<pre>
+  # /etc/init.d/mysql-development info
+INFO:  This instance of MySQL is configured as follows:
+INFO:  Configured Port:               nPort         = '4306'
+INFO:  Mountpoint directory:          dirMount      = '/var/serverdata'
+INFO:  Check mountpoint on startup:   bCheckMount   = 'false'
+INFO:  Home Directory:                dirHome       = '/var/serverdata/mysql'
+INFO:  Instance Name:                 nameInstance  = 'development'
+INFO:  Instance Directory - (base):   dirInstance   = '/var/serverdata/mysql/development'
+INFO:  Instance Directory - InnoDB:   dirInnodb     = '/var/serverdata/mysql/development/data/innodb'
+INFO:  Instance Directory - MyIsam:   dirMyisam     = '/var/serverdata/mysql/development/data/myisam'
+INFO:  Instance Directory - Logs:     dirLog        = '/var/serverdata/mysql/development/log'
+INFO:  Instance Directory - Run:      dirRun        = '/var/serverdata/mysql/development/run'
+
+INFO:  Feel free to change the variables 'nPort', 'dirMount', 'bCheckMount' in this init script to suit your system configuration.
+</pre>
+
+h4.  Create the instance:
+
+*Note:*  The @service@ command used below is specific to Fedora Linux.  Other distributions may have different commands to control the system services.  If unsure, please substitute @/etc/init.d/mysql-development@ in place of @service mysql-development@ below.
+
+<pre>
+#  service  mysql-development create
+WARNING:   Creating directory /var/serverdata/mysql ...
+INFO:   Initializing mysqld instance development ...
+INFO:   Initializing the zoneinfo files ...
+INFO:   Shutting down server running with socket /var/serverdata/mysql/development/run/mysqld.sock using /usr/bin/mysqladmin ...
+WARNING:   Did not find the server pid file on /var/serverdata/mysql/development/run/mysqld.pid. (may be OK)
+</pre>
+
+h4.  Start the service:
+
+<pre>
+#  service  mysql-development start
+091201 23:26:11 mysqld_safe Logging to '/var/serverdata/mysql/development/log/mysqld.error.log'.
+091201 23:26:11 mysqld_safe Starting mysqld daemon with databases from /var/serverdata/mysql/development/data/myisam
+INFO:   Mysql instance development with pid 12090 is running.
+</pre>
+
+h4.  Check the status:
+
+<pre>
+  # service  mysql-development status
+INFO:   Mysql instance development server Status ...
+/usr/bin/mysqladmin  Ver 8.42 Distrib 5.1.39, for redhat-linux-gnu on x86_64
+Copyright 2000-2008 MySQL AB, 2008 Sun Microsystems, Inc.
+This software comes with ABSOLUTELY NO WARRANTY. This is free software,
+and you are welcome to modify and redistribute it under the GPL license
+
+Server version          5.1.39-log
+Protocol version        10
+Connection              Localhost via UNIX socket
+UNIX socket             /var/serverdata/mysql/development/run/mysqld.sock
+Uptime:                 2 min 32 sec
+
+Threads: 1  Questions: 1  Slow queries: 0  Opens: 15  Flush tables: 1  Open tables: 8  Queries per second avg: 0.6
+Uptime: 153  Threads: 1  Questions: 2  Slow queries: 0  Opens: 15  Flush tables: 1  Open tables: 8  Queries per second avg: 0.13
+</pre>
+
+h4. At this point you should be able to connect to the running MySQL  instance:
+
+*Note:*  The MySQL instance is running on a machine with hostname @desktop1@.  Substitute your hostname (not 'localhost') below, for connecting to the server instance using TCP protocol:
+
+<pre>
+  $ mysql -u root -h desktop1 --port 4306  --protocol tcp -p
+Enter password:
+Welcome to the MySQL monitor.  Commands end with ; or \g.
+Your MySQL connection id is 3
+Server version: 5.1.39-log Source distribution
+
+Type 'help;' or '\h' for help. Type '\c' to clear the current input statement.
+
+mysql>
+</pre>
+
+*Remember* that the default MySQL root password for instances is the same as the instance name, but capitalized.  So for our example here, the password for the instance identified by @mysql-development@ init script would be @DEVELOPMENT@.
+
+h4.  Creating a new MySQL user account in the development server the esay way:
+
+During the server initialization (@create@ action), the script creates a handful of useful stored procedures in the system @mysql@ schema.  So if we wish to create a user called @redmine@ with password @REDMINE@, it is quite easy to do so at the @mysql>@ command prompt, using the @grantSysPrivileges@ stored procedure:
+
+<pre>
+mysql> use mysql;
+Reading table information for completion of table and column names
+You can turn off this feature to get a quicker startup with -A
+
+Database changed
+mysql> call grantSysPrivileges('redmine', 'REDMINE');
+Query OK, 0 rows affected, 33 warnings (0.01 sec)
+
+mysql> select user, password, host from mysql.user where user = 'redmine' ;
++---------+-------------------------------------------+-----------------------+
+| user    | password                                  | host                  |
++---------+-------------------------------------------+-----------------------+
+| redmine | *C3AD67ED98A0A82F53D1F223C6C135E89BCBD968 | 192.168.%             |
+| redmine | *C3AD67ED98A0A82F53D1F223C6C135E89BCBD968 | 10.%                  |
+| redmine | *C3AD67ED98A0A82F53D1F223C6C135E89BCBD968 | 127.0.%               |
+| redmine | *C3AD67ED98A0A82F53D1F223C6C135E89BCBD968 | 169.254.%             |
+| redmine | *C3AD67ED98A0A82F53D1F223C6C135E89BCBD968 | 172.%                 |
+| redmine | *C3AD67ED98A0A82F53D1F223C6C135E89BCBD968 | desktop%              |
+| redmine | *C3AD67ED98A0A82F53D1F223C6C135E89BCBD968 | localhost             |
+| redmine | *C3AD67ED98A0A82F53D1F223C6C135E89BCBD968 | localhost.localdomain |
+| redmine | *C3AD67ED98A0A82F53D1F223C6C135E89BCBD968 | localhost%            |
+| redmine | *C3AD67ED98A0A82F53D1F223C6C135E89BCBD968 | %                     |
+| redmine | *C3AD67ED98A0A82F53D1F223C6C135E89BCBD968 | desktop1.hostname.us  |
++---------+-------------------------------------------+-----------------------+
+11 rows in set (0.00 sec)
+
+mysql>
+</pre>
+
+Now you could connect to the server instance using this login name @redmine@ and password @REDMINE@, from another terminal as follows:
+
+<pre>
+  $ mysql -u redmine -h desktop1 --port 4306 --protocol tcp -pEnter password:
+Welcome to the MySQL monitor.  Commands end with ; or \g.
+Your MySQL connection id is 4
+Server version: 5.1.39-log Source distribution
+
+Type 'help;' or '\h' for help. Type '\c' to clear the current input statement.
+
+mysql>
+</pre>
+
+h1.  Testing
+
+Tested on the following system configuration:
+
+*  *Operating System:*   Fedora Linux 12 (x86_64)
+*  *MySQL version:*  5.1.39
+*  *Host Hardware:*  AMD Phenom II (x86_64)
+
+
